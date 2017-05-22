@@ -2,7 +2,7 @@
  * subsusf.c : USF subtitles decoder
  *****************************************************************************
  * Copyright (C) 2000-2006 VLC authors and VideoLAN
- * $Id: 1a94b6b4fdfb2deeabb4e6d6e193e1b6fa95ed27 $
+ * $Id: 14acc884ad82d4aed779a6050ed80deb63133e10 $
  *
  * Authors: Bernie Purcell <bitmap@videolan.org>
  *
@@ -24,6 +24,7 @@
 # include "config.h"
 #endif
 #include <assert.h>
+#include <limits.h>
 
 #include <vlc_common.h>
 #include <vlc_plugin.h>
@@ -824,7 +825,7 @@ static void ParseUSFHeaderTags( decoder_t *p_dec, xml_reader_t *p_xml_reader )
 /**
  * Create a region with a white transparent picture.
  */
-static subpicture_region_t *newPaintRegion( int x, int y, int width, int height )
+static subpicture_region_t *CreatePaintRegion( int x, int y, int width, int height )
 {
     video_palette_t palette = {
         .i_entries = 2,
@@ -845,6 +846,8 @@ static subpicture_region_t *newPaintRegion( int x, int y, int width, int height 
     fmt.p_palette        = &palette;
 
     subpicture_region_t *r = subpicture_region_New( &fmt );
+    video_format_Clean( &fmt );
+
     if ( !r )
         return NULL;
     r->i_x = x;
@@ -960,6 +963,23 @@ static void DrawCircle( subpicture_region_t *r, int x0, int y0, int diameter )
             err += 2*x;
             x--;
         }
+    }
+}
+
+static int ParseInteger(char *str)
+{
+    long int value = strtol( str, NULL, 10 );
+    if ( value >= INT_MIN && value <= INT_MAX)
+    {
+        return (int) value;
+    }
+    else if( value < INT_MIN )
+    {
+        return INT_MIN;
+    }
+    else
+    {
+        return INT_MAX;
     }
 }
 
@@ -1084,8 +1104,8 @@ static subpicture_region_t *ParseUSFString( decoder_t *p_dec,
                     if ( psz_point_x && psz_point_y &&
                        ( ( *pp_next = calloc( 1, sizeof( polydata ) ) ) != NULL ) )
                     {
-                        ( *pp_next )->x = (int)( strtol( psz_point_x, NULL, 10 ) );
-                        ( *pp_next )->y = (int)( strtol( psz_point_y, NULL, 10 ) );
+                        ( *pp_next )->x = ParseInteger( psz_point_x );
+                        ( *pp_next )->y = ParseInteger( psz_point_y );
                         pp_next = &( ( *pp_next )->next );
                     }
                     else
@@ -1093,8 +1113,8 @@ static subpicture_region_t *ParseUSFString( decoder_t *p_dec,
                         pp_next = NULL;
                     }
 
-                    if ( psz_point_x ) free( psz_point_x );
-                    if ( psz_point_y ) free( psz_point_y );
+                    free( psz_point_x );
+                    free( psz_point_y );
 
                     // get end of point and continue the search from there on
                     psz_point_end = strstr(psz_point_start, "/>") + 2;
@@ -1104,20 +1124,22 @@ static subpicture_region_t *ParseUSFString( decoder_t *p_dec,
                 {
                     // create and draw picture region
                     subpicture_region_t *p_paint_region;
-                    int video_width = p_sys->i_original_width;
-                    int video_height = p_sys->i_original_height;
-                    p_paint_region = newPaintRegion( 0, 0, video_width + 1, video_height + 1 );
-                    DrawPoly( p_paint_region, p_root );
+                    p_paint_region = CreatePaintRegion( 0, 0, p_sys->i_original_width + 1, p_sys->i_original_height + 1 );
 
-                    // save picture region in list
-                    if( !p_region_first )
+                    if( p_paint_region != NULL )
                     {
-                        p_region_first = p_region_upto = p_paint_region;
-                    }
-                    else if( p_paint_region )
-                    {
-                        p_region_upto->p_next = p_paint_region;
-                        p_region_upto = p_region_upto->p_next;
+                        DrawPoly( p_paint_region, p_root );
+
+                        // save picture region in list
+                        if( !p_region_first )
+                        {
+                            p_region_first = p_region_upto = p_paint_region;
+                        }
+                        else if( p_paint_region )
+                        {
+                            p_region_upto->p_next = p_paint_region;
+                            p_region_upto = p_region_upto->p_next;
+                        }
                     }
                 }
 
@@ -1144,34 +1166,35 @@ static subpicture_region_t *ParseUSFString( decoder_t *p_dec,
                 {
                     // create and draw picture region
                     subpicture_region_t *p_paint_region;
-                    int video_width = p_sys->i_original_width;
-                    int video_height = p_sys->i_original_height;
-                    p_paint_region = newPaintRegion( 0, 0, video_width + 1, video_height + 1 );
+                    p_paint_region = CreatePaintRegion( 0, 0, p_sys->i_original_width + 1, p_sys->i_original_height + 1 );
 
-                    // convert to int
-                    int x = (int)( strtol( psz_rec_x, NULL, 10 ) );
-                    int y = (int)( strtol( psz_rec_y, NULL, 10 ) );
-                    int w = (int)( strtol( psz_rec_width, NULL, 10 ) );
-                    int h = (int)( strtol( psz_rec_height, NULL, 10 ) );
-
-                    DrawRect( p_paint_region, x, y, x + w, y + h );
-
-                    // save picture region in list
-                    if( !p_region_first )
+                    if( p_paint_region != NULL )
                     {
-                        p_region_first = p_region_upto = p_paint_region;
-                    }
-                    else if( p_paint_region )
-                    {
-                        p_region_upto->p_next = p_paint_region;
-                        p_region_upto = p_region_upto->p_next;
+                        // convert to int
+                        int x = ParseInteger( psz_rec_x );
+                        int y = ParseInteger( psz_rec_y );
+                        int w = ParseInteger( psz_rec_width );
+                        int h = ParseInteger( psz_rec_height );
+
+                        DrawRect( p_paint_region, x, y, x + w, y + h );
+
+                        // save picture region in list
+                        if( !p_region_first )
+                        {
+                          p_region_first = p_region_upto = p_paint_region;
+                        }
+                        else if( p_paint_region )
+                        {
+                          p_region_upto->p_next = p_paint_region;
+                          p_region_upto = p_region_upto->p_next;
+                        }
                     }
                 }
 
-                if ( psz_rec_x ) free( psz_rec_x );
-                if ( psz_rec_y ) free( psz_rec_y );
-                if ( psz_rec_width ) free( psz_rec_width );
-                if ( psz_rec_height ) free( psz_rec_height );
+                free( psz_rec_x );
+                free( psz_rec_y );
+                free( psz_rec_width );
+                free( psz_rec_height );
             }
             else if ( !strncasecmp( psz_subtitle, "<point ", 7 ) )
             {
@@ -1187,32 +1210,33 @@ static subpicture_region_t *ParseUSFString( decoder_t *p_dec,
                 {
                      // create and draw picture region
                     subpicture_region_t *p_paint_region;
-                    int video_width = p_sys->i_original_width;
-                    int video_height = p_sys->i_original_height;
-                    p_paint_region = newPaintRegion( 0, 0, video_width + 1, video_height + 1 );
+                    p_paint_region = CreatePaintRegion( 0, 0, p_sys->i_original_width + 1, p_sys->i_original_height + 1 );
 
-                    // convert to int
-                    int x = (int)( strtol( psz_point_x, NULL, 10 ) );
-                    int y = (int)( strtol( psz_point_y, NULL, 10 ) );
-                    int d = (int)( strtol( psz_point_d, NULL, 10 ) );
-
-                    DrawCircle( p_paint_region, x, y, d );
-
-                    // save picture region in list
-                    if( !p_region_first )
+                    if( p_paint_region != NULL )
                     {
-                        p_region_first = p_region_upto = p_paint_region;
-                    }
-                    else if( p_paint_region )
-                    {
-                        p_region_upto->p_next = p_paint_region;
-                        p_region_upto = p_region_upto->p_next;
+                        // convert to int
+                        int x = ParseInteger( psz_point_x );
+                        int y = ParseInteger( psz_point_y );
+                        int d = ParseInteger( psz_point_d );
+
+                        DrawCircle( p_paint_region, x, y, d );
+
+                        // save picture region in list
+                        if( !p_region_first )
+                        {
+                          p_region_first = p_region_upto = p_paint_region;
+                        }
+                        else if( p_paint_region )
+                        {
+                          p_region_upto->p_next = p_paint_region;
+                          p_region_upto = p_region_upto->p_next;
+                        }
                     }
                 }
 
-                if ( psz_point_x ) free( psz_point_x );
-                if ( psz_point_y ) free( psz_point_y );
-                if ( psz_point_d ) free( psz_point_d );
+                free( psz_point_x );
+                free( psz_point_y );
+                free( psz_point_d );
             }
             else if(( !strncasecmp( psz_subtitle, "<text ", 6 )) ||
                     ( !strncasecmp( psz_subtitle, "<text>", 6 )))
