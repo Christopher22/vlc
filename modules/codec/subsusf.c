@@ -1080,29 +1080,24 @@ static subpicture_region_t *ParseUSFString( decoder_t *p_dec,
             else if(( !strncasecmp( psz_subtitle, "<polygon ", 9 )) ||
                     ( !strncasecmp( psz_subtitle, "<polygon>", 9 )))
             {
-                // get the end of the current polygon
                 psz_end = strstr ( psz_subtitle, "</polygon>" );
 
-                // initialize stuff
                 polydata *p_root = NULL;
                 polydata **pp_next = &p_root;
 
-                // starting position of next point
                 char *psz_point_start, *psz_point_end = NULL;
 
-                // check if next point is found and in current polygon
-                for ( psz_point_start = strstr( psz_subtitle, "<point " );
-                      pp_next &&
-                      psz_point_start && psz_point_start < psz_end ;
-                      psz_point_start = psz_point_end
-                        ? strstr( psz_point_end, "<point " ) : NULL )
+                // Iterate thought the points of the polygon by moving the pointer.
+                // For performance and readability reasons, the assignments are exceptionally made in the condition part.
+                for(char *data = psz_subtitle;
+                  data < psz_end && ( psz_point_start = strstr( data, "<point " ) ) != NULL && ( psz_point_end = strstr( psz_point_start, "/>" ) ) != NULL;
+                  data = psz_point_end + 2)
                 {
-                    // read attributes of points
                     char *psz_point_x = GrabAttributeValue( "posx", psz_point_start );
                     char *psz_point_y = GrabAttributeValue( "posy", psz_point_start );
+                    *pp_next = malloc( sizeof( polydata ) );
 
-                    if ( psz_point_x && psz_point_y &&
-                       ( ( *pp_next = calloc( 1, sizeof( polydata ) ) ) != NULL ) )
+                    if ( psz_point_x && psz_point_y && pp_next )
                     {
                         ( *pp_next )->x = ParseInteger( psz_point_x );
                         ( *pp_next )->y = ParseInteger( psz_point_y );
@@ -1115,9 +1110,6 @@ static subpicture_region_t *ParseUSFString( decoder_t *p_dec,
 
                     free( psz_point_x );
                     free( psz_point_y );
-
-                    // get end of point and continue the search from there on
-                    psz_point_end = strstr(psz_point_start, "/>") + 2;
                 }
 
                 if ( pp_next )
